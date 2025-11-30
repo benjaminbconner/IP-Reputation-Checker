@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IP Reputation Checker</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    /* small inline tweaks so you see loading/disabled state without changing your CSS file */
+    button[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .loading { font-style: italic; color: #666; }
+    .error { color: #b00020; font-weight: 600; }
+    .success { color: #0a7a0a; font-weight: 600; }
+    .warn { color: #b06a00; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>IP Reputation Checker</h2>
+    <input type="text" id="ipInput" placeholder="Enter IP address">
+    <button id="checkBtn" onclick="checkIP()">Check</button>
+    <div id="result" role="status" aria-live="polite"></div>
+  </div>
+
+  <script>
+    // Basic IPv4/IPv6 validation
+    function isValidIP(ip) {
+      if (!ip) return false;
+      // IPv4 quick check and octet bounds
+      const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+      if (ipv4.test(ip)) {
+        return ip.split('.').every(n => {
+          const v = Number(n);
+          return v >= 0 && v <= 255;
+        });
+      }
+      // IPv6 basic check (allows compressed forms)
+      const ipv6 = /^[0-9a-fA-F:]+$/;
+      return ipv6.test(ip) && ip.includes(':');
+    }
+
+    async function checkIP() {
+      const ip = document.getElementById("ipInput").value.trim();
+      const resultDiv = document.getElementById("result");
+      const btn = document.getElementById("checkBtn");
+
+      resultDiv.className = "";
+      resultDiv.textContent = "";
+
+      if (!ip) {
+        resultDiv.className = "error";
+        resultDiv.textContent = "Please enter an IP address.";
+        return;
+      }
+
+      if (!isValidIP(ip)) {
+        resultDiv.className = "error";
+        resultDiv.textContent = "Please enter a valid IPv4 or IPv6 address.";
+        return;
+      }
+
+      // UI: disable button and show loading
+      btn.disabled = true;
+      resultDiv.className = "loading";
+      resultDiv.textContent = "Checking…";
+
+      try {
+        const response = await fetch("/check_ip", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ip })
+        });
+
+        // Try to parse JSON safely
+        let data;
+        try {
+          data = await response.json();
+        } catch (e) {
+          // Non-JSON response
+          const text = await response.text();
+          throw new Error(`Unexpected server response: ${text || response.statusText}`);
+        }
+
+        // Handle HTTP errors with JSON body
+        if (!response.ok) {
+          const msg = data && (data.message || data.error) ? (data.message || data.error) : `Server returned ${response.status}`;
+          resultDiv.className = "error";
+          resultDiv.textContent = msg;
+          return;
+        }
+
+        // Normalized UI messages
+        if (data.status === "malicious") {
+          resultDiv.className = "warn";
+          resultDiv.textContent = `⚠️ ${ip} may be malicious (score: ${data.score}, reports: ${data.reports}).`;
+        } else if (data.status === "clean") {
+          resultDiv.className = "success";
+          resultDiv.textContent = `✅ ${ip} looks clean (score: ${data.score}, reports: ${data.reports}).`;
+        } else if (data.status === "unknown") {
+          resultDiv.className = "";
+          resultDiv.textContent = `ℹ️ ${ip}: ${data.message || "No data found."}`;
+        } else if (data.status === "invalid") {
+          resultDiv.className = "error";
+          resultDiv.textContent = data.message || "Invalid request.";
+        } else {
+          resultDiv.className = "";
+          resultDiv.textContent = data.message || "Unexpected response from server.";
+        }
+      } catch (err) {
+        resultDiv.className = "error";
+        resultDiv.textContent = err.message || "Server error. Please try again.";
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
